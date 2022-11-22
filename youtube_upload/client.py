@@ -11,6 +11,7 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
 from oauth2client.client import flow_from_clientsecrets
 from oauth2client.file import Storage
 from oauth2client.tools import run_flow
+from oauth2client.tools import argparser
 
 from youtube_upload import CLIENT_SECRETS_FILE
 from youtube_upload import MAX_RETRIES
@@ -22,6 +23,8 @@ from youtube_upload import VALID_PRIVACY_STATUSES
 from youtube_upload import YOUTUBE_API_SERVICE_NAME
 from youtube_upload import YOUTUBE_API_VERSION
 from youtube_upload import YOUTUBE_UPLOAD_SCOPE
+from youtube_upload import YOUTUBE_READONLY_SCOPE
+from youtube_upload import YOUTUBE_EDIT_SCOPE
 
 from youtube_upload.oauth_template import oauth_template
 
@@ -125,21 +128,46 @@ class YoutubeUploader():
 
         self.flow = flow_from_clientsecrets(
             self.secrets_file,
-            scope=YOUTUBE_UPLOAD_SCOPE,
+            scope=[YOUTUBE_UPLOAD_SCOPE, YOUTUBE_READONLY_SCOPE,YOUTUBE_EDIT_SCOPE],
             message=MISSING_CLIENT_SECRETS_MESSAGE)
         storage = Storage(self.oauth_path)
         self.credentials = storage.get()
+        options = argparser.parse_args()
+        #options.auth_host_name="127.0.0.1"
+        #options.auth_host_port=[80]
+        #options.noauth_local_webserver=True
 
         # Catches the edge case where no credentials were provided
         if self.credentials is None or self.credentials.invalid:
             # this wil only run if there is no callback function
-            self.credentials = run_flow(self.flow, storage)
+            self.credentials = run_flow(self.flow, storage,options)
 
+        print("AUTHENTICATED")
         self.youtube = build(
             YOUTUBE_API_SERVICE_NAME,
             YOUTUBE_API_VERSION,
             http=self.credentials.authorize(
                 httplib2.Http()))
+
+    # todo make it work also with youtube title
+    def update(self, youtube_id, options=None):
+        body = { "id": youtube_id}
+        snippet = {"categoryId":28}
+        if options.get("categoryId") is not None:
+            snippet["categoryId"] = options["categoryId"]
+        if options.get("title") is not None:
+            snippet["title"] = options["title"]
+        if options.get("tags") is not None:
+            snippet["tags"] = options.get("tags") 
+        if options.get("description") is not None:
+            snippet["description"] = options.get("description")
+        body["snippet"] = snippet
+        res = self.youtube.videos().list(id=youtube_id,part='snippet').execute()
+        print(res["items"])
+        update_response = self.youtube.videos().update(part='snippet', body=body).execute()
+        print(update_response)
+        return update_response
+
 
     def upload(self, file_path, options=None, chunksize=(-1)):
         '''
@@ -183,7 +211,6 @@ class YoutubeUploader():
                 'selfDeclaredMadeForKids': options.get('kids', False)
             }
         }
-
         insert_request = self.youtube.videos().insert(
             part=",".join(
                 list(
@@ -318,5 +345,5 @@ class YoutubeUploader():
         '''
         Tears down and closes the class cleanly.
         '''
-        if os.path.exists(self.oauth_path):
-            os.remove(self.oauth_path)
+        #if os.path.exists(self.oauth_path):
+        #    os.remove(self.oauth_path)
